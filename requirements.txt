@@ -1,0 +1,15 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+pydantic-settings>=2.4
+httpx>=0.27
+PyMuPDF>=1.24
+h2>=4.1
+
+# 版式引擎 v2(原版式重排):pdf2zh + babeldoc 版面分析
+pdf2zh>=1.9.11
+# 以下两项是 pdf2zh 的上游依赖,新版有破坏性变更,必须固定
+# (bitstring 5.x 移除了 BitStream;tencentcloud 新版改了 tmt.models)
+bitstring==4.3.1
+tencentcloud-sdk-python-common==3.0.1300
+tencentcloud-sdk-python-tmt==3.0.1300

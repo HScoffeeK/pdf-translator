@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF 翻译</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --text: #1f2328; --muted: #6a737d;
+  --accent: #2563eb; --accent-soft: #eff4ff; --border: #e2e6eb;
+  --ok: #16a34a; --warn: #d97706; --err: #dc2626;
+}
+* { box-sizing: border-box; margin: 0; }
+body {
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: var(--bg); color: var(--text); min-height: 100vh;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 60px; }
+h1 { font-size: 22px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 22px; }
+.card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px; margin-bottom: 16px;
+}
+.drop {
+  border: 2px dashed var(--border); border-radius: 12px; padding: 42px 20px;
+  text-align: center; color: var(--muted); cursor: pointer; transition: .15s;
+}
+.drop.over, .drop:hover { border-color: var(--accent); background: var(--accent-soft); }
+.drop b { color: var(--text); }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+select, button, input[type=number] {
+  font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--card); cursor: pointer;
+}
+input[type=number] { width: 76px; }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+button.danger { color: var(--err); border-color: #f3c1c1; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.bar { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; margin: 10px 0; }
+.bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+.job-title { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+.badge.queued, .badge.extracting, .badge.translating, .badge.interrupted { background: #fef3c7; color: var(--warn); }
+.badge.done { background: #dcfce7; color: var(--ok); }
+.badge.partial, .badge.failed { background: #fee2e2; color: var(--err); }
+.muted { color: var(--muted); font-size: 13px; }
+.para { padding: 14px 4px; border-bottom: 1px solid var(--border); }
+.para .src { color: var(--muted); font-size: 13.5px; line-height: 1.65; }
+.para .dst { margin-top: 8px; line-height: 1.8; font-size: 15px; }
+.para .src, .para .dst { white-space: pre-wrap; overflow-wrap: anywhere; }
+.para .dst.failed { color: var(--err); font-size: 13px; }
+.pgsep { margin: 26px 0 8px; color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 10px; }
+.pgsep::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.actions { display: flex; gap: 8px; }
+.err { color: var(--err); font-size: 13px; margin-top: 6px; white-space: pre-wrap; }
+.hidden { display: none; }
+.topbar { display: flex; justify-content: space-between; align-items: center; }
+#viewBtns button.active { border-color: var(--accent); color: var(--accent); }
+.lefttoggle { display: inline-flex; gap: 6px; margin-left: 10px; vertical-align: middle; }
+.lefttoggle button {
+  font-size: 12px; padding: 2px 10px; border-radius: 10px; border: 1px solid var(--border);
+  background: #fff; color: var(--muted); cursor: pointer;
+}
+.lefttoggle button.active { border-color: var(--accent); color: var(--accent); }
+
+/* ---- 左右对照视图 ---- */
+.sync-page { display: flex; gap: 14px; margin-bottom: 26px; align-items: flex-start; }
+.sync-left { width: 50%; }
+.sync-img { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.sync-right { width: 50%; position: relative; }
+.sync-para {
+  position: absolute; left: 0; width: 50%; font-size: 13px; line-height: 1.55;
+  padding-right: 4px; overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.sync-para.wide { width: 100%; }
+.sync-para.col2 { left: 50%; }
+.sync-para.failed { color: var(--err); }
+.sync-note { font-size: 12px; color: var(--muted); margin: -16px 0 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PDF 翻译</h1>
+  <div class="sub">整篇翻译 · 左右对照校对 · 本地运行 · 支持断点续跑</div>
+
+  <div class="card">
+    <div class="drop" id="drop">
+      <div style="font-size:34px">📄</div>
+      <div><b>拖拽 PDF 到此处</b>,或点击选择文件</div>
+    </div>
+    <input type="file" id="file" accept=".pdf" class="hidden">
+    <div class="row">
+      <label class="muted">引擎</label>
+      <select id="engine"></select>
+      <label class="muted">重试次数</label>
+      <input type="number" id="retries" min="1" max="10" value="4" title="每段翻译失败后的重试次数(1-10)">
+      <label class="muted" title="只翻译选中的页,如 1-10,15;留空=全部。之后还能在任务里追加页">页码范围</label>
+      <input type="text" id="pages" style="width:130px" placeholder="如 1-10,15(可选)">
+      <button class="primary" id="go" disabled>开始翻译</button>
+      <span class="muted" id="engNote"></span>
+    </div>
+    <details style="margin-top:10px">
+      <summary class="muted" style="cursor:pointer">AI 翻译设置（想要更高质量？用 AI 引擎）</summary>
+      <div class="muted" style="margin:8px 0 2px;line-height:1.9">
+        ① 打开 open.bigmodel.cn 免费注册，创建 API Key<br>
+        ② 把 Key 粘到下面，点保存<br>
+        ③ 上传 PDF 时引擎选「GLM 智谱」即可
+      </div>
+      <div class="row" style="margin-top:6px">
+        <input type="password" id="llmKey" style="width:220px" placeholder="粘贴智谱 API Key">
+        <button id="llmSave">保存</button>
+        <button id="llmClear">清除</button>
+      </div>
+      <div class="row" style="margin-top:4px">
+        <span class="muted">自定义服务(选 LLM 引擎时才需要):</span>
+        <input type="text" id="llmBase" style="flex:1;min-width:180px" placeholder="接口地址,如 https://api.openai.com/v1">
+        <input type="text" id="llmModel" style="width:150px" placeholder="模型名">
+      </div>
+      <div class="muted" id="llmNote" style="margin-top:6px"></div>
+      <div class="muted" style="margin-top:4px">Key 只保存在你这个浏览器里(localStorage),服务器不存储、别人拿不到;多人使用请各自填自己的 Key。</div>
+    </details>
+    <div class="err hidden" id="upErr"></div>
+  </div>
+
+  <div class="card hidden" id="jobCard">
+    <div class="topbar">
+      <div class="job-title">
+        <span id="jName"></span>
+        <span class="badge" id="jStatus"></span>
+        <span class="muted" id="jEngine"></span>
+      </div>
+      <div class="actions">
+        <select id="layoutSel" title="中文版 PDF 的排版引擎">
+          <option value="v1" selected>版式引擎: 原位覆写</option>
+          <option value="v2">版式引擎: 智能重排(试验,部分文档)</option>
+        </select>
+        <button id="exportBtn" class="primary hidden" title="生成新 PDF:原版式,英文替换为中文">下载中文版 PDF</button>
+        <button id="delFileBtn" class="hidden" title="删除上传的 PDF 源文件,保留译文结果">删除 PDF</button>
+        <button id="retryBtn" class="hidden">重试失败段落</button>
+        <button id="delBtn" class="danger">删除任务</button>
+      </div>
+    </div>
+    <div class="bar"><div id="jBar"></div></div>
+    <div class="muted" id="jProg"></div>
+    <div class="row hidden" id="moreRow">
+      <label class="muted">追加翻译页</label>
+      <input type="text" id="morePages" style="width:130px" placeholder="如 11-20">
+      <button id="moreGo">翻译这些页</button>
+      <span class="muted">已译页会跳过,继续累加</span>
+    </div>
+    <div class="err hidden" id="jErr"></div>
+    <div class="row" id="viewBtns">
+      <button id="vSync" class="active">对照视图</button>
+      <button id="vBoth">双语对照</button>
+      <button id="vTrans">仅译文</button>
+    </div>
+  </div>
+
+  <div id="result"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+let currentJob = null, pollTimer = null, viewMode = 'sync', lastResult = null, rightMode = 'zh', zhVer = 0;
+
+const STATUS_TEXT = {
+  queued: '排队中', extracting: '提取文本', translating: '翻译中',
+  done: '完成', partial: '部分失败', failed: '失败', interrupted: '已中断',
+};
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  return r.json();
+}
+
+async function loadEngines() {
+  const engines = await api('/api/engines');
+  const sel = $('engine');
+  sel.innerHTML = '';
+  for (const e of engines) {
+    const o = document.createElement('option');
+    o.value = e.id;
+    o.textContent = e.name
+      + (((e.id === 'glm' || e.id === 'llm') && !getStoredKey()) ? ' — 未配 Key(见下方设置)' : '');
+    if (e.default) o.selected = true;
+    sel.appendChild(o);
+  }
+  $('engNote').textContent = getStoredKey() ? ''
+    : 'AI 引擎(GLM/LLM)需在下方"AI 翻译设置"里填入你自己的 Key;Google 引擎无需 Key';
+}
+
+function viewFile(f) {
+  $('upErr').classList.add('hidden');
+  $('go').disabled = !f;
+  $('go').textContent = f ? `翻译「${f.name}」` : '开始翻译';
+  $('drop').innerHTML = f
+    ? `<div style="font-size:34px">📄</div><div><b>${f.name}</b></div>`
+    : `<div style="font-size:34px">📄</div><div><b>拖拽 PDF 到此处</b>,或点击选择文件</div>`;
+}
+
+$('drop').onclick = () => $('file').click();
+$('file').onchange = e => viewFile(e.target.files[0]);
+for (const ev of ['dragover', 'dragenter'])
+  $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.add('over'); });
+for (const ev of ['dragleave', 'drop'])
+  $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.remove('over'); });
+$('drop').addEventListener('drop', e => viewFile(e.dataTransfer.files[0]));
+
+$('go').onclick = async () => {
+  const f = $('file').files[0];
+  if (!f) return;
+  let retries = parseInt($('retries').value, 10);
+  if (isNaN(retries)) retries = 4;
+  retries = Math.max(1, Math.min(10, retries));
+  $('retries').value = retries;
+  $('go').disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append('file', f);
+    fd.append('engine', $('engine').value);
+    fd.append('retries', String(retries));
+    if ($('pages').value.trim()) fd.append('pages', $('pages').value.trim());
+    const { job_id } = await api('/api/jobs', { method: 'POST', body: fd, headers: keyHeaders() });
+    $('pages').value = '';
+    await selectJob(job_id);
+  } catch (e) {
+    $('upErr').textContent = e.message;
+    $('upErr').classList.remove('hidden');
+  }
+  $('go').disabled = false;
+};
+
+/* ---- AI 设置:Key 存浏览器 localStorage,随请求携带,服务器不落盘 ---- */
+const LLM_KEY_STORAGE = 'pdt_llm_key';
+const getStoredKey = () => localStorage.getItem(LLM_KEY_STORAGE) || '';
+const setStoredKey = v => v ? localStorage.setItem(LLM_KEY_STORAGE, v) : localStorage.removeItem(LLM_KEY_STORAGE);
+const keyHint = k => k.length > 10 ? `${k.slice(0,4)}…${k.slice(-4)}` : '已配置';
+const keyHeaders = () => { const k = getStoredKey(); return k ? { 'X-LLM-Key': k } : {}; };
+
+async function loadLlmSettings() {
+  try {
+    const s = await api('/api/settings/llm');
+    $('llmBase').value = s.base_url || '';
+    $('llmModel').value = s.model || '';
+  } catch { /* 服务未就绪时忽略 */ }
+  const k = getStoredKey();
+  $('llmKey').value = '';
+  $('llmKey').placeholder = k ? `已配置(${keyHint(k)}),粘贴新 Key 可替换` : '粘贴智谱 API Key';
+  $('llmNote').textContent = k ? '已保存在本浏览器,上传时选「GLM 智谱」引擎即可' : '按上面三步填入 Key 后保存即可';
+}
+
+$('llmSave').onclick = async () => {
+  const key = $('llmKey').value.trim();
+  const body = {};
+  if ($('llmBase').value.trim()) body.base_url = $('llmBase').value.trim();
+  if ($('llmModel').value.trim()) body.model = $('llmModel').value.trim();
+  try {
+    if (Object.keys(body).length)
+      await api('/api/settings/llm', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+    if (key) setStoredKey(key);
+    $('llmNote').textContent = key ? '已保存在本浏览器(服务器不存储)' : (Object.keys(body).length ? '自定义服务配置已保存' : '没有可保存的内容');
+    await loadLlmSettings();
+    await loadEngines();
+  } catch (e) { $('llmNote').textContent = '保存失败: ' + e.message; }
+};
+
+$('llmClear').onclick = async () => {
+  setStoredKey('');
+  try { await api('/api/settings/llm/clear', { method: 'POST' }); } catch { /* 服务端可能本就为空 */ }
+  $('llmNote').textContent = '已清除(浏览器与服务器的 Key 均已删除)';
+  await loadLlmSettings();
+  await loadEngines();
+};
+
+/* ---- 追加翻译页 ---- */
+$('moreGo').onclick = async () => {
+  if (!currentJob) return;
+  const spec = $('morePages').value.trim();
+  if (!spec) return;
+  $('moreGo').disabled = true;
+  try {
+    await api(`/api/jobs/${currentJob}/pages`, { method: 'POST', headers: {'Content-Type': 'application/json', ...keyHeaders()}, body: JSON.stringify({ pages: spec }) });
+    $('morePages').value = '';
+    await selectJob(currentJob);
+  } catch (e) { alert('追加失败: ' + e.message); }
+  $('moreGo').disabled = false;
+};
+
+async function selectJob(id) {
+  if (pollTimer) clearInterval(pollTimer);
+  currentJob = id;
+  lastResult = null;
+  zhVer = Date.now();  // 每次进入任务都取最新生成
+  $('jobCard').classList.remove('hidden');
+  $('result').innerHTML = '';
+  pollTimer = setInterval(poll, 1200);
+  await poll();
+}
+
+async function poll() {
+  if (!currentJob) return;
+  let j;
+  try { j = await api(`/api/jobs/${currentJob}`); }
+  catch { clearInterval(pollTimer); return; }
+  $('jName').textContent = j.filename;
+  $('jEngine').textContent = j.engine;
+  const st = $('jStatus');
+  st.textContent = STATUS_TEXT[j.status] || j.status;
+  st.className = 'badge ' + j.status;
+  const total = j.total || 0, done = j.done || 0;
+  $('jBar').style.width = total ? `${Math.round(100 * done / total)}%` : '0';
+  $('jProg').textContent = (total ? `${done} / ${total} 段` : '')
+    + (j.pages ? `　·　已选页: ${j.pages}` : '');
+  $('moreRow').classList.toggle('hidden',
+    !['done', 'partial', 'failed', 'interrupted'].includes(j.status));
+  $('jErr').classList.toggle('hidden', !j.error);
+  if (j.error) $('jErr').textContent = j.error;
+  $('retryBtn').classList.toggle('hidden', !['failed', 'partial', 'interrupted'].includes(j.status));
+  $('delFileBtn').classList.toggle('hidden', !['done', 'partial', 'failed'].includes(j.status));
+  $('exportBtn').classList.toggle('hidden', !['done', 'partial'].includes(j.status));
+  if (['done', 'partial', 'failed'].includes(j.status)) {
+    clearInterval(pollTimer); pollTimer = null;
+    if (j.status !== 'failed') await renderResult();
+  }
+}
+
+$('retryBtn').onclick = async () => {
+  if (!currentJob) return;
+  await api(`/api/jobs/${currentJob}/retry`, { method: 'POST', headers: keyHeaders() });
+  await selectJob(currentJob);
+};
+
+$('exportBtn').onclick = () => {
+  if (!currentJob) return;
+  const btn = $('exportBtn');
+  const layout = $('layoutSel').value;
+  btn.disabled = true;
+  btn.textContent = layout === 'v2' ? '重排中…(首次约需数十秒)' : '生成中…';
+  fetch(`/api/jobs/${currentJob}/export?layout=${layout}`, { headers: keyHeaders() })
+    .then(async r => {
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+      return r.blob();
+    })
+    .then(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'translated.pdf';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    })
+    .catch(e => alert('导出失败: ' + e.message))
+    .finally(() => { btn.disabled = false; btn.textContent = '下载中文版 PDF'; });
+};
+
+$('delFileBtn').onclick = async () => {
+  if (!currentJob) return;
+  if (!confirm('删除上传的 PDF 源文件?译文结果会保留,但对照视图左侧将无法显示原文页面。')) return;
+  try {
+    await api(`/api/jobs/${currentJob}/delete-file`, { method: 'POST' });
+    await renderResult(); // 刷新后左侧图片会显示占位
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+  }
+};
+
+$('delBtn').onclick = async () => {
+  if (!currentJob) return;
+  await api(`/api/jobs/${currentJob}`, { method: 'DELETE' });
+  if (pollTimer) clearInterval(pollTimer);
+  currentJob = null;
+  $('jobCard').classList.add('hidden');
+  $('result').innerHTML = '';
+};
+
+$('vSync').onclick = () => setView('sync');
+$('vBoth').onclick = () => setView('both');
+$('vTrans').onclick = () => setView('trans');
+
+function setView(mode) {
+  viewMode = mode;
+  $('vSync').classList.toggle('active', mode === 'sync');
+  $('vBoth').classList.toggle('active', mode === 'both');
+  $('vTrans').classList.toggle('active', mode === 'trans');
+  renderResult();
+}
+
+function setRightMode(mode) {
+  rightMode = mode;
+  renderResult();
+}
+
+$('layoutSel').onchange = () => {
+  zhVer = Date.now();  // 切换版式引擎后强制换新页图
+  if (lastResult) renderResult();
+};
+
+async function renderResult() {
+  if (!currentJob) return;
+  let data;
+  try { data = await api(`/api/jobs/${currentJob}/result`); }
+  catch { return; }
+  lastResult = data;
+  const box = $('result');
+  box.innerHTML = '';
+  if (viewMode === 'sync') return renderSync(data, box);
+  renderList(data, box, viewMode === 'trans');
+}
+
+/* ---- 左右对照:左侧原 PDF 页面渲染图;右侧可选"中文版 PDF 页图"或"仅译文文字" ---- */
+function renderSync(data, box) {
+  const pages = data.pages || [];
+  const byPage = {};
+  for (const p of data.paragraphs) (byPage[p.page] ??= []).push(p);
+  if (pages.length === 0) {
+    renderList(data, box, false);
+    return;
+  }
+  const note = el('div', 'sync-note');
+  note.textContent = '左侧原文,右侧对照;';
+  const toggle = el('span', 'lefttoggle');
+  for (const [mode, label] of [['zh', '右侧:中文版 PDF'], ['text', '右侧:仅译文']]) {
+    const b = el('button');
+    b.textContent = label;
+    if (rightMode === mode) b.classList.add('active');
+    b.onclick = () => setRightMode(mode);
+    toggle.appendChild(b);
+  }
+  note.appendChild(toggle);
+  box.appendChild(note);
+
+  for (const meta of pages) {
+    const sep = el('div', 'pgsep');
+    sep.textContent = `第 ${meta.page} 页`;
+    box.appendChild(sep);
+
+    const sec = el('div', 'sync-page');
+    // 左:原 PDF 页面
+    const left = el('div', 'sync-left');
+    const img = el('img', 'sync-img');
+    img.src = `/api/jobs/${currentJob}/page/${meta.page}`;
+    img.alt = `第 ${meta.page} 页`;
+    const right = el('div', 'sync-right');
+    img.onload = () => { right.style.height = img.clientHeight + 'px'; };
+    img.onerror = () => {
+      left.innerHTML = '';
+      const ph = el('div', 'muted');
+      ph.style.cssText = 'padding:30px 10px;text-align:center;border:1px solid var(--border);border-radius:6px;';
+      ph.textContent = 'PDF 源文件已删除,无法显示原文页面';
+      left.appendChild(ph);
+      right.style.height = '400px';
+    };
+    left.appendChild(img);
+
+    const zhReady = ['done', 'partial'].includes(lastResult?.job?.status);
+    if (rightMode === 'zh' && zhReady) {
+      // 右:中文版 PDF 页图(带版本参数,服务端重新生成后强制破缓存)
+      const zimg = el('img', 'sync-img');
+      const zurl = `/api/jobs/${currentJob}/page/${meta.page}?zh=1&layout=${$('layoutSel').value}&v=${zhVer}`;
+      // img 标签不能附加 X-LLM-Key;用 fetch 带浏览器本地 Key 取 blob,
+      // 这样多人部署时每个人的 GLM key 仍只在自己的浏览器里流转。
+      fetch(zurl, {headers: keyHeaders()})
+        .then(r => { if (!r.ok) throw new Error('中文版生成失败'); return r.blob(); })
+        .then(blob => {
+          if (!zimg.isConnected) return;
+          const url = URL.createObjectURL(blob);
+          zimg.onload = () => URL.revokeObjectURL(url);
+          zimg.src = url;
+        })
+        .catch(() => { zimg.dispatchEvent(new Event('error')); });
+      zimg.alt = `第 ${meta.page} 页 中文版`;
+      zimg.onerror = () => {
+        right.innerHTML = '';
+        const ph = el('div', 'muted');
+        ph.style.cssText = 'padding:30px 10px;text-align:center;border:1px solid var(--border);border-radius:6px;';
+        ph.textContent = '中文版生成失败,可切换"仅译文"查看';
+        right.appendChild(ph);
+      };
+      right.appendChild(zimg);
+    } else {
+      // 右:仅译文文字,按原文位置比例定位
+      for (const p of byPage[meta.page] || []) {
+        const d = el('div', 'sync-para');
+        if (meta.ncols === 1 || p.wide) d.classList.add('wide');
+        else if (p.col === 1) d.classList.add('col2');
+        if (p.status !== 'ok') d.classList.add('failed');
+        d.style.top = (p.top * 100) + '%';
+        d.textContent = p.status === 'ok' ? p.translation : '⚠ ' + (p.error || '未翻译');
+        right.appendChild(d);
+      }
+    }
+
+    sec.appendChild(left);
+    sec.appendChild(right);
+    box.appendChild(sec);
+  }
+}
+
+/* ---- 双语 / 仅译文列表 ---- */
+function renderList(data, box, transOnly) {
+  let lastPage = 0;
+  for (const p of data.paragraphs) {
+    if (p.page !== lastPage) {
+      lastPage = p.page;
+      const sep = el('div', 'pgsep');
+      sep.textContent = `第 ${p.page} 页`;
+      box.appendChild(sep);
+    }
+    const d = el('div', 'para');
+    if (!transOnly) {
+      const s = el('div', 'src');
+      s.textContent = p.source;
+      d.appendChild(s);
+    }
+    const t = el('div', 'dst' + (p.status !== 'ok' ? ' failed' : ''));
+    t.textContent = p.status === 'ok' ? p.translation : (p.error ? `⚠ ${p.error}` : '未翻译');
+    d.appendChild(t);
+    box.appendChild(d);
+  }
+}
+
+loadEngines();
+loadLlmSettings();
+</script>
+</body>
+</html>

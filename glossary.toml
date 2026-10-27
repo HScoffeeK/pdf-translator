@@ -1,0 +1,6 @@
+# 术语表:原文 => 固定译名(词边界匹配,大小写不敏感)
+# LLM 引擎通过 prompt 遵守;免费引擎在译后替换。
+
+[terms]
+# "large language model" = "大语言模型"
+# "transformer" = "Transformer"

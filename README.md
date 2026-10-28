@@ -5,6 +5,22 @@
 
 ## 快速开始
 
+**零命令行部署**(推荐给非技术用户):
+
+1. 从 GitHub 获取代码:仓库页绿色 **Code** 按钮 → **Download ZIP**,解压(不需要装 git);
+2. **Windows**:双击 `start.bat`;**macOS/Linux**:终端里运行 `./start.sh`。
+
+脚本会自动完成以下全部步骤,无需任何命令:
+
+- 检测 Python;若未安装会**询问是否自动下载并安装**(Windows 仅装到当前用户、免管理员,约 26MB,自动配国内镜像)
+- 创建虚拟环境并安装依赖(依赖清单更新时会自动补装,否则直接跳过)
+- 启动服务并**自动打开浏览器** http://127.0.0.1:8765
+
+> 从浏览器下载的脚本可能触发 Windows SmartScreen 提示,点"仍要运行"即可。
+> 需能访问谷歌的网络(免费引擎经系统 curl 请求;Windows 10+/macOS/Linux 自带 curl)。
+
+**手动方式**(等价,适合开发者):
+
 ```bash
 cd pdf-translator
 python -m venv .venv
@@ -12,10 +28,10 @@ python -m venv .venv
 # .venv/bin/pip install -r requirements.txt          # Linux/macOS
 
 .venv\Scripts\python -m app                          # 启动,默认 http://127.0.0.1:8765
-```
+``` 
 
 浏览器打开 http://127.0.0.1:8765 ,拖入 PDF 即可。结果页可切换"双语对照 / 仅译文",
-Ctrl+P 可把结果页另存为 PDF。
+Ctrl+P 可把结果页另存为 PDF。所有数据(上传的 PDF、数据库)都在 `data/` 目录。
 
 ## 翻译引擎
 
@@ -75,7 +91,14 @@ XNOROS_HOST=0.0.0.0 PDT_API_TOKEN=某长随机串 .venv/bin/python -m app
 ```
 
 前端为纯静态文件,可交给 nginx;后端可 `uvicorn app.main:app` 多进程。
-SQLite 换 Postgres 只需改 `app/db.py` 一层。Dockerfile 已附。
+SQLite 换 Postgres 只需改 `app/db.py` 一层。Docker 部署:
+
+```bash
+docker build -t pdf-translator .
+docker run -d -p 8765:8765 -v pdf-translator-data:/srv/app/data pdf-translator
+```
+
+镜像内已装 curl(谷歌引擎需要);数据持久化在卷 `pdf-translator-data`。
 
 ## 测试
 

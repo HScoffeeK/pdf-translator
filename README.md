@@ -1,11 +1,11 @@
 # PDF 翻译工具
 
-本地运行的 PDF 整篇翻译工具:上传 PDF → 自动提取(双栏识别、页眉页脚剔除)→
-翻译 → 浏览器里看**双语对照**结果。支持断点续跑与翻译缓存。
+本地运行的 PDF 整篇翻译工具:上传 PDF → 自动提取
+翻译 → 浏览器里看**双语对照**结果。
 
 ## 快速开始
 
-**零命令行部署**(推荐给非技术用户):
+**零命令行部署**:
 
 1. 从 GitHub 获取代码:仓库页绿色 **Code** 按钮 → **Download ZIP**,解压(不需要装 git);
 2. **Windows**:双击 `start.bat`;**macOS/Linux**:终端里运行 `./start.sh`。
@@ -19,7 +19,7 @@
 > 从浏览器下载的脚本可能触发 Windows SmartScreen 提示,点"仍要运行"即可。
 > 需能访问谷歌的网络(免费引擎经系统 curl 请求;Windows 10+/macOS/Linux 自带 curl)。
 
-**手动方式**(等价,适合开发者):
+**手动方式**:
 
 ```bash
 cd pdf-translator
@@ -37,25 +37,22 @@ Ctrl+P 可把结果页另存为 PDF。所有数据(上传的 PDF、数据库)都
 
 | 引擎 | 配置 | 说明 |
 |---|---|---|
-| `google` | 零配置 | 默认。免费网页接口;**经系统 curl 请求**(该接口按 TLS 指纹拒绝 Python 客户端,程序已自动处理,curl 不存在时回退 httpx) |
+| `google` | 零配置 | 默认。免费网页接口|
 | `glm` | 网页里填智谱 API Key(存你自己的浏览器) | **推荐**。智谱 GLM(OpenAI 兼容),`glm-4-flash` 免费;地址和模型已内置,只需填 Key(open.bigmodel.cn 注册即得) |
 | `llm` | 网页"LLM 引擎配置"里填,或 `PDT_LLM_API_KEY` | 自定义 OpenAI 兼容服务:GPT/DeepSeek/Kimi/本地 Ollama 均可。术语表经 prompt 生效,质量最好 |
 | `mock` | `PDT_ENABLE_MOCK=1` | 测试用 |
 
 切换方式:上传时在页面下拉选择,或改 `.env` 里的 `PDT_ENGINE`。
-LLM 的 Base URL / API Key / 模型名可直接在网页上填写保存(存 `data/app.db`,
-库值优先于 `.env`),不用改配置文件。
+LLM 的 Base URL / API Key / 模型名可直接在网页上填写保存(存 `data/app.db`),不用改配置文件。
 
-### Key 的安全边界
+### Key 不共享
 
 - **Key 默认只保存在各用户自己的浏览器里**(localStorage),翻译时随请求
   (`X-LLM-Key` 头)带给服务端、仅在内存中使用一次,**不写入任何数据库或文件**。
 - 服务端无 Key 时,AI 引擎(GLM/LLM)的任务会提示补 Key;Google 引擎不受影响。
-- 因此**部署给多人是安全的**:别人用你的实例,消耗的是他们自己浏览器里的 Key,
+- 因此**部署给多人是安全的**:别人用你的实例,消耗的是自己浏览器里的 Key,
   你的 Key 他们拿不到也用不了。每位使用者在页面"AI 翻译设置"里填自己的 Key 即可。
 - 配置区的"清除"按钮会同时清掉浏览器里的 Key 和服务端可能存在的共享配置。
-- 进阶(自用):也可经 `POST /api/settings/llm` 在服务端存共享 Key(或用
-  `PDT_LLM_API_KEY`),适合单人部署懒得每次填的场景;多人部署不建议。
 
 ## 大文件:选页翻译
 
@@ -65,8 +62,7 @@ LLM 的 Base URL / API Key / 模型名可直接在网页上填写保存(存 `dat
 
 ## 配置
 
-复制 `.env.example` 为 `.env` 按需修改;每项均可用 `PDT_` 前缀的环境变量覆盖
-(容器部署友好)。常用:
+复制 `.env.example` 为 `.env` 按需修改;每项均可用 `PDT_` 前缀的环境变量覆盖。常用:
 
 - `PDT_ENGINE` 默认引擎;`PDT_TARGET_LANG` 目标语言(默认 zh-CN)
 - `PDT_LLM_BASE_URL` / `PDT_LLM_API_KEY` / `PDT_LLM_MODEL` — LLM 引擎
@@ -78,8 +74,7 @@ LLM 的 Base URL / API Key / 模型名可直接在网页上填写保存(存 `dat
 
 ## 数据
 
-任务、段落、翻译缓存都存在 `data/app.db`(SQLite)。重跑失败任务时已译段落
-直接命中缓存,不会重复请求引擎。删除任务会同时删除上传的文件。
+任务、段落、翻译缓存都存在 `data/app.db`(SQLite)。重跑失败任务时已译段落不会重复请求引擎。删除任务会同时删除上传的文件。
 
 ## 部署(预留)
 
@@ -98,14 +93,7 @@ docker build -t pdf-translator .
 docker run -d -p 8765:8765 -v pdf-translator-data:/srv/app/data pdf-translator
 ```
 
-镜像内已装 curl(谷歌引擎需要);数据持久化在卷 `pdf-translator-data`。
-
-## 测试
-
-```bash
-.venv/Scripts/python tests/test_extract.py   # 提取算法断言(双栏/续行/页眉页脚/References)
-.venv/Scripts/python tests/test_e2e.py       # HTTP 全链路(mock 引擎)
-```
+镜像内已装 curl(谷歌引擎需要);数据在 `pdf-translator-data`。
 
 ## 导出中文版 PDF(两种版式引擎)
 
@@ -113,20 +101,14 @@ docker run -d -p 8765:8765 -v pdf-translator-data:/srv/app/data pdf-translator
 
 | 引擎 | 原理 | 适合 |
 |---|---|---|
-| **智能重排 v2(试验,默认不选)** | [pdf2zh/babeldoc](https://github.com/Byaidu/PDFMathTranslate) 做版面分析(标题/正文/公式/表格/双栏),再在块内重排中文 | **部分文档**:数学/多栏/复杂版式通常更稳,但不同字体可能触发公式识别误判;失败会拒绝发布不完整 PDF |
-| 原位覆写 v1 | 自研:白矩形覆盖原文,按提取段落几何原位写中文 | 当前默认,适合版式简单或需要即时可用的文档 |
+| **智能重排 v2(试验,默认不选)** | [pdf2zh/babeldoc](https://github.com/Byaidu/PDFMathTranslate) 做版面分析(标题/正文/公式/表格/双栏),再在块内重排中文 | **部分文档**:数学/多栏/复杂版式通常更可靠，但不同字体可能触发公式识别误判;失败会拒绝发布不完整 PDF |
+| 原位覆写 v1 | 覆盖原文,按提取段落几何原位写中文 | 当前默认,适合版式简单或需要即时可用的文档 |
 
 v2 的翻译**仍走本项目引擎**(curl 谷歌 / GLM / LLM + 用户 Key),复用同一份
 翻译缓存,不会重复消耗额度。首次运行会下载约 75MB 版面模型到
 `~/.cache/babeldoc/models/`(国内可从 ModelScope 手动放置同名文件)。
 
-v2 的自动降级:先用默认公式字体规则(学术论文的公式原样保留);
-若检测到几乎没译出中文(典型原因:无衬线字体的 LaTeX 正文被误判为公式),
-只放宽正文无衬线字体的误判规则重跑,仍保留数学字体识别。若文本块翻译失败
-或公式占位符被改写,v2 不会发布不完整 PDF,而是报错让你切换引擎/重试。
-
-v1 的说明:原文位置用白矩形覆盖、中文按段落几何写入、字号自适应。注意原英文
-文本仍在 PDF 文本层(可复制粘贴);视觉上完全是中文版。
+v2 的自动降级:先用默认公式字体规则(学术论文的公式原样保留);若文本块翻译失败或公式占位符被改写,v2 不会发布不完整 PDF,而是报错让你切换引擎/重试。
 
 导出文件在 `data/exports/`,文件名 `<原文件名>_中文版.pdf`(v2 带 `_重排版` 后缀)。
 

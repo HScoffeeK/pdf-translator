@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 from pathlib import Path
@@ -31,8 +32,48 @@ class Pdf2zhUnavailable(RuntimeError):
     """pdf2zh 未安装或版面模型缺失。"""
 
 
+def _ensure_layout_model() -> None:
+    """确保版面模型已在 babeldoc 缓存;缺失时按国内可达优先顺序下载(带超时)。
+
+    babeldoc 自己的上游探测会先连 huggingface.co,在无法访问它的网络里可能
+    长时间挂起 —— 这就是"v2 一直转圈不生成"的原因。这里抢先自己下载并校验,
+    babeldoc 之后会直接命中缓存,不再联网。
+    """
+    from babeldoc.assets.assets import (
+        DOCLAYOUT_YOLO_DOCSTRUCTBENCH_IMGSZ1024ONNX_SHA3_256,
+        DOC_LAYOUT_ONNX_MODEL_URL,
+        get_cache_file_path,
+        verify_file,
+    )
+    sha = DOCLAYOUT_YOLO_DOCSTRUCTBENCH_IMGSZ1024ONNX_SHA3_256
+    onnx_path = get_cache_file_path(
+        "doclayout_yolo_docstructbench_imgsz1024.onnx", "models")
+    if verify_file(onnx_path, sha):
+        return
+    urls = [DOC_LAYOUT_ONNX_MODEL_URL.get(n)
+            for n in ("modelscope", "hf-mirror", "huggingface")]
+    last_err = "无可用下载源"
+    for name, url in zip(("modelscope", "hf-mirror", "huggingface"), urls):
+        if not url:
+            continue
+        try:
+            proc = subprocess.run(
+                ["curl", "-fL", "--connect-timeout", "10", "--max-time", "300",
+                 "-o", str(onnx_path), url],
+                capture_output=True, timeout=330)
+            if proc.returncode == 0 and verify_file(onnx_path, sha):
+                print(f"[pdf2zh] layout model downloaded from {name}", flush=True)
+                return
+            last_err = f"{name} 下载失败(curl exit {proc.returncode})"
+        except Exception as e:  # noqa: BLE001
+            last_err = f"{name} 下载异常: {e}"
+    raise Pdf2zhUnavailable(
+        f"版面模型下载失败({last_err})。请检查网络后重试,或改用「原位覆写」引擎;"
+        f"也可手动下载 {DOC_LAYOUT_ONNX_MODEL_URL.get('modelscope')} 并放置到 {onnx_path}。")
+
+
 def _load_model():
-    """加载 DocLayout-YOLO 版面模型(首次需下载 ~75MB,缓存在 ~/.cache/babeldoc)。"""
+    """加载 DocLayout-YOLO 版面模型(先确保模型文件就位,避免 babeldoc 挂起)。"""
     global _model
     if _model is not None:
         return _model
@@ -40,13 +81,11 @@ def _load_model():
         from pdf2zh.doclayout import DocLayoutModel
     except ImportError as e:  # pragma: no cover 依赖缺失
         raise Pdf2zhUnavailable(f"pdf2zh 未安装: {e}") from e
+    _ensure_layout_model()
     try:
         _model = DocLayoutModel.load_available()
-    except Exception as e:  # pragma: no cover 模型下载失败
-        raise Pdf2zhUnavailable(
-            "版面模型缺失或下载失败(DocLayout-YOLO)。"
-            "请检查网络,或手动放置 doclayout_yolo_docstructbench_imgsz1024.onnx "
-            f"到 ~/.cache/babeldoc/models/。原始错误: {e}") from e
+    except Exception as e:  # pragma: no cover
+        raise Pdf2zhUnavailable(f"版面模型加载失败: {e}") from e
     return _model
 
 

@@ -153,6 +153,30 @@ async def extract_more_pages(job_id: int, pages_spec: str,
             pass
 
 
+def _summarize_failures(job_id: int, total_failed: int) -> str:
+    """聚合失败段落的报错,给出最常见原因和可行动的指引(而不是笼统的"N 段失败")。"""
+    rows = db.query(
+        "SELECT error FROM paragraphs WHERE job_id=? AND status='failed'", (job_id,))
+    errors = [r["error"] or "" for r in rows]
+    hints = [
+        ("未提供 AI Key",
+         "AI 引擎未提供 Key:请在页面「AI 翻译设置」里填入并保存自己的 Key,然后点「重试失败段落」"),
+        ("429",
+         "翻译接口被限流(HTTP 429):请等几分钟再点「重试失败段落」,或切换其他引擎"),
+        ("网络错误",
+         "无法连接翻译接口(当前网络访问不了谷歌):请检查网络/代理,或切换 GLM 引擎(国内直连可用)"),
+    ]
+    for pat, msg in hints:
+        n = sum(1 for e in errors if pat in e)
+        if n >= max(1, total_failed // 2):
+            return f"{total_failed} 段翻译失败:{msg}(命中 {n}/{total_failed} 段)"
+    from collections import Counter
+    common = Counter(e.split(";")[0][:80] for e in errors if e).most_common(1)
+    detail = common[0][0] if common else "未知错误"
+    return (f"{total_failed} 段翻译失败:{detail}。"
+            "可点「重试失败段落」续跑,或在页面上方切换引擎重试")
+
+
 async def run_job(job_id: int, on_progress: ProgressCb = _noop,
                   llm_key: str | None = None) -> None:
     job = db.get_job(job_id)
@@ -260,12 +284,12 @@ async def run_job(job_id: int, on_progress: ProgressCb = _noop,
             await asyncio.gather(*(translate_group(g) for g in groups))
 
         final = db.job_counts(job_id)
-        if final["failed"] and final["done"] == 0:
-            db.set_job(job_id, status="failed",
-                       error=f"全部 {final['failed']} 段翻译失败,请检查网络或更换引擎")
-        elif final["failed"]:
-            db.set_job(job_id, status="partial",
-                       error=f"{final['failed']} 段失败,可重试续跑")
+        if final["failed"]:
+            reason = _summarize_failures(job_id, final["failed"])
+            if final["done"] == 0:
+                db.set_job(job_id, status="failed", error=reason)
+            else:
+                db.set_job(job_id, status="partial", error=reason)
         else:
             db.set_job(job_id, status="done", error=None)
         await on_progress(job_id, "done" if final["failed"] == 0 else "partial",

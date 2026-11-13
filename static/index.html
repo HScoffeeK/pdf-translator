@@ -462,22 +462,28 @@ function renderSync(data, box) {
       // img 标签不能附加 X-LLM-Key;用 fetch 带浏览器本地 Key 取 blob,
       // 这样多人部署时每个人的 GLM key 仍只在自己的浏览器里流转。
       fetch(zurl, {headers: keyHeaders()})
-        .then(r => { if (!r.ok) throw new Error('中文版生成失败'); return r.blob(); })
+        .then(async r => {
+          if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(d.detail || '中文版生成失败');
+          }
+          return r.blob();
+        })
         .then(blob => {
           if (!zimg.isConnected) return;
           const url = URL.createObjectURL(blob);
           zimg.onload = () => URL.revokeObjectURL(url);
           zimg.src = url;
         })
-        .catch(() => { zimg.dispatchEvent(new Event('error')); });
-      zimg.alt = `第 ${meta.page} 页 中文版`;
-      zimg.onerror = () => {
-        right.innerHTML = '';
-        const ph = el('div', 'muted');
-        ph.style.cssText = 'padding:30px 10px;text-align:center;border:1px solid var(--border);border-radius:6px;';
-        ph.textContent = '中文版生成失败,可切换"仅译文"查看';
-        right.appendChild(ph);
-      };
+        .catch(err => {
+          if (!zimg.isConnected) return;
+          right.innerHTML = '';
+          const ph = el('div', 'muted');
+          ph.style.cssText = 'padding:20px 10px;text-align:center;border:1px solid var(--border);border-radius:6px;white-space:pre-wrap;text-align:left;';
+          ph.textContent = (err && err.message ? err.message : '中文版生成失败')
+            + '\n可切换"仅译文"查看,或换用另一个版式引擎。';
+          right.appendChild(ph);
+        });
       right.appendChild(zimg);
     } else {
       // 右:仅译文文字,按原文位置比例定位

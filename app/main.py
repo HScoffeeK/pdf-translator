@@ -83,6 +83,18 @@ async def create_job(
     except TranslationError as e:
         raise HTTPException(400, str(e)) from e
 
+    # AI 引擎需要 Key:浏览器携带的优先,其次服务端共享配置;都没有时直接拒绝,
+    # 避免建任务后整篇全部失败(报错还误导成"网络问题")。
+    if eng in ("glm", "llm"):
+        from .translate import llm_config
+        has_key = bool((x_llm_key or "").strip()) or bool(
+            llm_config("glm" if eng == "glm" else None)["api_key"])
+        if not has_key:
+            raise HTTPException(
+                400,
+                "GLM/LLM 引擎需要 AI Key:请在页面「AI 翻译设置」里填入并保存后重试,"
+                "或改用 Google 引擎(免费,无需 Key)")
+
     if retries is not None and not (1 <= retries <= 10):
         raise HTTPException(400, "重试次数须在 1~10 之间")
 

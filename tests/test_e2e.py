@@ -197,6 +197,27 @@ def main() -> None:
         eng = {e["id"]: e for e in client.get("/api/engines").json()}
         assert eng["llm"]["ready"] is False
 
+        # AI 引擎无 Key 时,上传阶段直接拒绝并给明确指引(不建注定全失败的任务)
+        with open(SAMPLE, "rb") as f:
+            r = client.post(
+                "/api/jobs", files={"file": ("glm.pdf", f, "application/pdf")},
+                data={"engine": "glm"},
+            )
+        assert r.status_code == 400 and "Key" in r.json()["detail"], r.text
+        with open(SAMPLE, "rb") as f:
+            r = client.post(
+                "/api/jobs", files={"file": ("llm.pdf", f, "application/pdf")},
+                data={"engine": "llm"},
+            )
+        assert r.status_code == 400 and "Key" in r.json()["detail"], r.text
+        # 带 X-LLM-Key 头则放行
+        with open(SAMPLE, "rb") as f:
+            r = client.post(
+                "/api/jobs", files={"file": ("glm2.pdf", f, "application/pdf")},
+                data={"engine": "glm"}, headers={"X-LLM-Key": "sk-x"},
+            )
+        assert r.status_code == 201, r.text
+
         # 二次上传走缓存:同文件新任务,翻译应瞬时完成且段落数一致
         with open(SAMPLE, "rb") as f:
             r2 = client.post(
